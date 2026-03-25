@@ -10,6 +10,28 @@ EFI_FV_SIGNATURE = b'_FVH'
 PE_MZ_SIGNATURE = b'MZ'
 BMP_SIGNATURE = b'BM'
 
+def calc_pe_real_size(data):
+    pe_ptr = struct.unpack_from('<H', data, 0x3C)[0]
+    if data[pe_ptr:pe_ptr + 2] != b'PE':
+        raise ValueError("Not a valid PE")
+
+    num_sec = struct.unpack_from('<H', data, pe_ptr + 0x06)[0]
+    opt_size = struct.unpack_from('<H', data, pe_ptr + 0x14)[0]
+    sec_table = pe_ptr + 0x18 + opt_size
+
+    # SizeOfHeaders 作为初始最小值，防止截断头部数据
+    real_len = struct.unpack_from('<I', data, pe_ptr + 0x54)[0]
+
+    for i in range(num_sec):
+        sec_off = sec_table + i * 0x28
+        size_of_raw    = struct.unpack_from('<I', data, sec_off + 0x10)[0]  # SizeOfRawData
+        pointer_to_raw = struct.unpack_from('<I', data, sec_off + 0x14)[0]  # PointerToRawData
+        end = pointer_to_raw + size_of_raw
+        if end > real_len:
+            real_len = end
+
+    return real_len
+
 class HeavyExtractor:
     def __init__(self, verbose=False, info_only=False):
         self.pe_files = []
@@ -143,29 +165,20 @@ def main():
             ext.pe_files.sort(key=lambda x: len(x[1]), reverse=True)
             _, loader_data, _ = ext.pe_files[0]
             try:
-                pe_ptr = struct.unpack_from('<H', loader_data, 0x3C)[0]
-                num_sec = struct.unpack_from('<H', loader_data, pe_ptr + 0x06)[0]
-                opt_size = struct.unpack_from('<H', loader_data, pe_ptr + 0x14)[0]
-                last_sec = pe_ptr + 0x18 + opt_size + (num_sec - 1) * 0x28
-                real_len = struct.unpack_from('<I', loader_data, last_sec + 0x14)[0] + \
-                           struct.unpack_from('<I', loader_data, last_sec + 0x18)[0]
+                real_len = calc_pe_real_size(loader_data)
                 final_path = os.path.join(args.output, "LinuxLoader.efi")
                 with open(final_path, 'wb') as f: f.write(loader_data[:real_len])
                 print(f"[+] Extracted LinuxLoader.efi to {final_path}")
-            except:
+            except Exception as e:
+                # 失败时保存整个块
                 final_path = os.path.join(args.output, "LinuxLoader.efi")
                 with open(final_path, 'wb') as f: f.write(loader_data)
-                print(f"[!] Saved raw PE chunk to {final_path} (trimming failed)")
+                print(f"[!] Saved raw PE chunk to {final_path} (trimming failed: {e})")
         
         if args.extract in ["pe32", "all"]:
             for i, (off, data, info) in enumerate(ext.pe_files):
                 try:
-                    pe_ptr = struct.unpack_from('<H', data, 0x3C)[0]
-                    num_sec = struct.unpack_from('<H', data, pe_ptr + 0x06)[0]
-                    opt_size = struct.unpack_from('<H', data, pe_ptr + 0x14)[0]
-                    last_sec = pe_ptr + 0x18 + opt_size + (num_sec - 1) * 0x28
-                    real_len = struct.unpack_from('<I', data, last_sec + 0x14)[0] + \
-                               struct.unpack_from('<I', data, last_sec + 0x18)[0]
+                    real_len = calc_pe_real_size(data)
                     pe_slice = data[:real_len]
                 except:
                     pe_slice = data
