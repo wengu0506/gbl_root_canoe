@@ -26,6 +26,7 @@ const elements = {
   confirmText: document.getElementById("confirmText"),
   nextConfirmButton: document.getElementById("nextConfirmButton"),
   cancelConfirmButton: document.getElementById("cancelConfirmButton"),
+  updateEfispCheckbox: document.getElementById("updateEfispCheckbox"),
 };
 
 function getKsuBridge() {
@@ -130,6 +131,8 @@ function renderStatus(status) {
     elements.stateChip.classList.add("chip-success");
   } else if (taskState === "error") {
     elements.stateChip.classList.add("chip-danger");
+  } else if (taskState === "warning") {
+    elements.stateChip.classList.add("chip-warn");
   } else if (running) {
     elements.stateChip.classList.add("chip-warn");
   }
@@ -180,8 +183,11 @@ function closeConfirmModal() {
 
 function openConfirmModal() {
   const targetSlot = state.status?.TARGET_SLOT || "?";
+  const withEfisp = Boolean(elements.updateEfispCheckbox?.checked);
   state.confirmStep = 1;
-  elements.confirmText.textContent = `第一次确认: 将把当前槽位的 BL 分区拷贝到槽位 ${targetSlot}，并修补 efisp。请确认槽位无误。`;
+  elements.confirmText.textContent = withEfisp
+    ? `第一次确认: 将把当前槽位的 BL 分区拷贝到槽位 ${targetSlot}，并更新 efisp。请确认槽位无误。`
+    : `第一次确认: 将把当前槽位的 BL 分区拷贝到槽位 ${targetSlot}，不更新 efisp。请确认槽位无误。`;
   elements.nextConfirmButton.textContent = "继续确认";
   elements.confirmModal.classList.remove("hidden");
   elements.confirmModal.setAttribute("aria-hidden", "false");
@@ -201,14 +207,17 @@ function handleConfirmProgress() {
 }
 
 function startFlash() {
+  const flashMode = elements.updateEfispCheckbox?.checked ? "update-efisp" : "skip-efisp";
   try {
-    const output = parseKeyValueOutput(runScript("start"));
+    const output = parseKeyValueOutput(runScript("start", flashMode));
     if (output.ALREADY_RUNNING) {
       toast("已有刷写任务在运行");
     } else if (output.STARTED === "1") {
       toast("刷写任务已启动");
     } else if (output.FINISHED === "success") {
       toast("刷写已完成");
+    } else if (output.FINISHED === "warning") {
+      toast("BL 刷写完成，但 efisp 未更新");
     } else if (output.FINISHED === "error") {
       toast("刷写任务已结束（失败）");
     } else {

@@ -13,7 +13,7 @@
           <p class="eyebrow">KernelSU Module WebUI</p>
           <h1>BL Flasher</h1>
           <p class="hero-copy">
-            自动识别当前活动槽位，并把BL相关镜像刷写到另一个槽位，并自动修补新版ABL到efisp
+            自动识别当前活动槽位，如果新版本存在GBL漏洞，则跳过BL刷写，同时将BL相关镜像刷写到另一个槽位，并按需求自动修补新版ABL到efisp
           </p>
         </div>
         <div class="hero-meta">
@@ -52,6 +52,11 @@
             <button class="primary-button" id="flashButton" type="button">刷写到另一槽位</button>
             <button class="ghost-button" id="clearLogButton" type="button">清空日志</button>
           </div>
+
+          <label class="option-check" for="updateEfispCheckbox">
+            <input id="updateEfispCheckbox" type="checkbox" />
+            <span>更新 efisp（默认关闭，仅勾选时执行）</span>
+          </label>
 
           <p class="warning-copy">
             刷写对象是 bootloader 相关分区，风险较高。开始前请确认镜像与机型严格匹配。

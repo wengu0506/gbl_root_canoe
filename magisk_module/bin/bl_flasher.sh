@@ -140,6 +140,7 @@ UPDATED_AT=${_upd}"
 }
 
 run_flash() {
+  update_efisp="${1:-skip-efisp}"
   ensure_runtime
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     write_log '已有刷写任务在执行，拒绝重复启动'
@@ -160,23 +161,30 @@ run_flash() {
 
   write_state 'running' "正在将镜像刷写到槽位 $target_slot"
   write_log "当前槽位: $current_slot  目标槽位: $target_slot"
+  efisp_failed='0'
 
-  #patch abl and flash efisp first, since it's the only one that can brick the device if something goes wrong
-  abl_part=$(partition_path abl "$target_slot")
-  #0 success, 1 failed, 2 new ABL version with GBL vulnerability detected
-  patch_efisp "$abl_part"
-  ret=$?
-  case $ret in
-    0) ;; # 成功，继续
-    1) write_state 'error' 'efisp 分区刷写失败，已中止'
-       write_log 'efisp 分区刷写失败，已中止'
-       exit 1 ;;
-    2) write_state 'success' 'efisp 分区刷写完成，但跳过了BL刷写以保留BL版本'
-       write_log 'efisp 分区刷写完成，但跳过了BL刷写以保留BL版本（检测到GBL漏洞）'
-       exit 0 ;;
-    *) write_state 'error' '未知错误'
-       exit 1 ;;
-  esac
+  if [ "$update_efisp" = 'update-efisp' ] || [ "$update_efisp" = '1' ] || [ "$update_efisp" = 'true' ]; then
+    #patch abl and flash efisp first, since it's the only one that can brick the device if something goes wrong
+    abl_part=$(partition_path abl "$target_slot")
+    #0 success, 1 failed, 2 new ABL version with GBL vulnerability detected
+    patch_efisp "$abl_part"
+    ret=$?
+    case $ret in
+      0) ;; # 成功，继续
+       1) efisp_failed='1'
+         write_state 'running' 'efisp 分区刷写失败，继续刷写 BL 以保留旧版本'
+         write_log '警告：新版本ABL补丁应用失败，但是继续刷写BL以保留BL版本，以加载旧版本efisp'
+         write_log '理论可以保留BL版本成功引导，但不排除存在未知风险，请上传补丁日志以供分析'
+         ;;
+      2) write_state 'success' 'efisp 分区刷写完成，但跳过了BL刷写以保留BL版本'
+         write_log 'efisp 分区刷写完成，但跳过了BL刷写（检测到GBL漏洞）'
+         exit 0 ;;
+      *) write_state 'error' '未知错误'
+         exit 1 ;;
+    esac
+  else
+    write_log '未勾选 efisp 更新，跳过 efisp 分区操作'
+  fi
 
   for name in $IMAGE_NAMES; do
     part=$(partition_path "$name" "$target_slot")
@@ -194,19 +202,28 @@ run_flash() {
     write_log "$name 完成"
   done
 
-  write_state 'success' "全部刷写完成，建议切换到槽位 $target_slot 后重启"
-  write_log '全部镜像刷写完成'
+  if [ "$efisp_failed" = '1' ]; then
+    write_state 'warning' "BL 刷写完成，但 efisp 未更新"
+    write_log 'BL 镜像刷写完成，但 efisp 未更新'
+  elif [ "$update_efisp" = 'update-efisp' ] || [ "$update_efisp" = '1' ] || [ "$update_efisp" = 'true' ]; then
+    write_state 'success' "全部刷写完成（含 efisp）"
+    write_log '全部镜像与 efisp 刷写完成'
+  else
+    write_state 'success' "全部刷写完成（未更新 efisp）"
+    write_log '全部镜像刷写完成（未更新 efisp）'
+  fi
 }
 
 start_flash() {
+  update_efisp="${1:-skip-efisp}"
   ensure_runtime
   if pid=$(current_pid 2>/dev/null); then
     emit "ALREADY_RUNNING=${pid}"; return 0
   fi
   if command -v nohup >/dev/null 2>&1; then
-    nohup sh "$0" flash >/dev/null 2>&1 &
+    nohup sh "$0" flash "$update_efisp" >/dev/null 2>&1 &
   else
-    sh "$0" flash </dev/null >/dev/null 2>&1 &
+    sh "$0" flash "$update_efisp" </dev/null >/dev/null 2>&1 &
   fi
   sleep 1
   if pid=$(current_pid 2>/dev/null); then
@@ -215,7 +232,7 @@ PID=${pid}"
   else
     _st=''; [ -f "$STATE_FILE" ] && read -r _st < "$STATE_FILE"
     case "$_st" in
-      success|error) emit "FINISHED=${_st}" ;;
+      success|error|warning) emit "FINISHED=${_st}" ;;
       *) emit 'STARTED=0' ;;
     esac
   fi
@@ -234,8 +251,8 @@ clear_log() {
 
 case "$1" in
   status)    print_status ;;
-  flash)     run_flash ;;
-  start)     start_flash ;;
+  flash)     run_flash "$2" ;;
+  start)     start_flash "$2" ;;
   log)       print_log ;;
   tail)      tail_log "$2" ;;
   clear-log) clear_log ;;

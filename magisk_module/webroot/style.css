@@ -214,6 +214,21 @@ body::before {
   margin-top: 18px;
 }
 
+.option-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  color: #2b1f17;
+  font-size: 14px;
+}
+
+.option-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-strong);
+}
+
 button {
   border: 0;
   cursor: pointer;
